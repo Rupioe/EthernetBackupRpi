@@ -12,6 +12,6 @@ generating rsa keys for the ssh connection
 
 
 # Steps
-Install the ifplugd directory content to /etc/ifplugd/
+Install the files to /etc/ifplugd/
 systemctl enable ifplugd@enp0s13f0u1u2u1.service && systemctl start ifplugd@enp0s13f0u1u2u1.service
 replace enp0s13f0u1u2u1 with your ethernet interface name
