@@ -1,0 +1,74 @@
+#!/bin/bash
+if [ "$2" = "up" ]; then
+
+	# DEBUG :
+	#echo 69 > /etc/ifplugd/last_backup.date
+
+	# check last backup date :
+	if [ $(($(("$(head -n 1 /etc/ifplugd/last_backup.date)")) + 86400)) -le "$(date +%s)" ]; then # for an astronomic julienne year there is 31557600 seconds or 2 629 800 seconds per month, or 86 400 secondes per day
+
+		# recording time
+		start=$(date +%s)
+
+		# DEBUG :
+		# nohup sleep 3 &
+
+		# Cleaning log file :
+		truncate -s 0 /etc/ifplugd/rsync.log
+
+		# RSYNC :
+		backup () {
+
+		if [ "$(sed -n 's/^Verbose=//p' /etc/ifplugd/rsync_ifplugd.conf)" = "true" ]; then # checks for verbose option in config file
+
+			nohup rsync -rlptgoxWDAXHP --delete --numeric-ids --quiet --no-compress -v --info=progress2 \
+			-e "ssh -i /home/rupioe/.ssh/private_keys/rpi_rsa -p 22 -B '$1'" \
+			--exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/mnt/*","/lost+found","/c/*","/var/lib/dhcpcd/*","/var/cache/*","/home/rupioe/.cache/*","/home/rupioe/.local/share/Steam/*"} \
+			"$2" \
+			rupioe@["$(ping ff02::1%"$1" -L -c 1 | grep from | awk -F'[[:space:]]|%' '{print $4}' )"]:/backups/arch_baremetal/ 
+
+		else
+			nohup rsync --recursive --links --perms --acls --times --group --owner --one-file-system --whole-file --devices --xattrs --hard-links --partial --delete --numeric-ids --quiet --no-compress \
+			-e "ssh -i /home/rupioe/.ssh/private_keys/rpi_rsa -p 22 -B '$1'" \
+			--exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/mnt/*","/lost+found","/c/*","/var/lib/dhcpcd/*","/var/cache/*","/home/rupioe/.cache/*","/home/rupioe/.local/share/Steam/*"} \
+			"$2" \
+			rupioe@["$(ping ff02::1%"$1" -L -c 1 | grep from | awk -F'[[:space:]]|%' '{print $4}' )"]:/backups/arch_baremetal/
+		fi
+
+}
+
+		# optimising transfer with multiple rsyncs at one time
+		export -f backup
+		export HOME=/root
+		
+		backup "$1" /  >> /etc/ifplugd/rsync.log 2>&1 &
+
+		# update backup date while ongoing :
+		date +'%s%nLast backup (processing) : %c' > /etc/ifplugd/last_backup.date
+
+		uplog () {
+			# waiting to confirm sync :
+
+			# update log on rpi :
+			while [ -e "/proc/$!" ]
+			do
+				sleep 3
+			done
+			DELT=$(($(("$(date +%s)"-"$3"))/60))
+			TIMEST=$(date +'%d/%m/%Y %H:%M')
+			nohup ssh -i /home/rupioe/.ssh/private_keys/rpi_rsa -p 22 -B "$1" rupioe@"$(ping ff02::1%"$1" -L -c 1 | grep from | awk -F'[[:space:]]|%' '{print $4}')" \
+/bin/bash << EOF
+/backups/.du -hx -d 0 /backups/arch_baremetal/ | head -n1 | sed -e 's/\s.*$//' | xargs -I % echo -e ${TIMEST},${DELT} min,% >> /backups/arch.logs
+EOF
+
+			date +'%s%nLast backup : %c' > /etc/ifplugd/last_backup.date
+}
+		export -f uplog
+		uplog "$1" "$!" "$start" >> /etc/ifplugd/rsync.log 2>&1 &
+		
+	else
+		exit 0 # backup is up to date, exiting
+	fi
+else
+	exit 1 # interface is not up, exiting
+fi
